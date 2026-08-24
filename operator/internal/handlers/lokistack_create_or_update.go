@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -183,6 +184,14 @@ func CreateOrUpdateLokiStack(
 
 		if isNamespacedResource(obj) {
 			obj.SetNamespace(req.Namespace)
+
+			existing := obj.DeepCopyObject().(client.Object)
+			err := k.Get(ctx, client.ObjectKeyFromObject(obj), existing)
+			if err == nil && !metav1.IsControlledBy(existing, &stack) {
+				l.Error(nil, "resource already exists and is not managed by this LokiStack")
+				errCount++
+				continue
+			}
 
 			if err := ctrl.SetControllerReference(&stack, obj, s); err != nil {
 				l.Error(err, "failed to set controller owner reference to resource")
