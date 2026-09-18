@@ -238,8 +238,10 @@ func (c *Calculator) processStreamsSection(ctx context.Context, section *dataobj
 					return fmt.Errorf("failed to append to stream: %w", err)
 				}
 				streamIDLookup[stream.ID] = newStreamID
-				streamLabels[stream.ID] = stream.Labels
-				shardBuckets[stream.ID] = streams.ShardBucket(stream.Labels)
+				if _, ok := streamLabels[stream.ID]; !ok {
+					streamLabels[stream.ID] = stream.Labels
+					shardBuckets[stream.ID] = streams.ShardBucket(stream.Labels)
+				}
 				c.uncompressedByTenant[section.Tenant] += uint64(stream.UncompressedSize)
 			}
 			return nil
@@ -290,7 +292,7 @@ func (c *Calculator) processLogsSection(ctx context.Context, sectionLogger log.L
 	lockFreeContext := *calculationContext
 	lockFreeContext.builder = nil
 
-	calculationSteps := getLogsCalculationSteps(sectionSortSchema(schemaLabels))
+	calculationSteps := getLogsCalculationSteps(schemaLabels)
 
 	// Track cumulative duration per calculation step across all batches + flush.
 	stepDurations := make([]time.Duration, len(calculationSteps))
