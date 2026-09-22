@@ -19,7 +19,6 @@ import (
 
 	ctrlconfigv1 "github.com/grafana/loki/operator/api/config/v1"
 	lokiv1 "github.com/grafana/loki/operator/api/loki/v1"
-	lokiv1beta1 "github.com/grafana/loki/operator/api/loki/v1beta1"
 	"github.com/grafana/loki/operator/internal/config"
 	lokictrl "github.com/grafana/loki/operator/internal/controller/loki"
 	"github.com/grafana/loki/operator/internal/metrics"
@@ -36,8 +35,6 @@ var scheme = runtime.NewScheme()
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
-	utilruntime.Must(lokiv1beta1.AddToScheme(scheme))
 
 	utilruntime.Must(lokiv1.AddToScheme(scheme))
 
