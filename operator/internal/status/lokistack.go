@@ -192,16 +192,10 @@ func checkForZoneawareNodes(ctx context.Context, k client.Client, zones []lokiv1
 }
 
 func generateWarnings(stack *lokiv1.LokiStack) []metav1.Condition {
-	warnings := make([]metav1.Condition, 0, 2)
-	schemas := stack.Spec.Storage.Schemas
+	warnings := make([]metav1.Condition, 0, 5)
 
-	if len(schemas) > 0 && schemas[len(schemas)-1].Version != lokiv1.ObjectStorageSchemaV13 {
-		warnings = append(warnings, metav1.Condition{
-			Type:    string(lokiv1.ConditionWarning),
-			Reason:  string(lokiv1.ReasonStorageNeedsSchemaUpdate),
-			Message: messageWarningNeedsSchemaVersionUpdate,
-		})
-	}
+	// Check schema status for warnings
+	warnings = append(warnings, checkSchemaWarnings(stack)...)
 
 	// Check if the ingester's replicas are less than or equal to the replication factor
 	rf := manifests.DefaultLokiStackSpec(stack.Spec.Size).Replication.Factor
@@ -220,6 +214,75 @@ func generateWarnings(stack *lokiv1.LokiStack) []metav1.Condition {
 			Type:    string(lokiv1.ConditionWarning),
 			Reason:  string(lokiv1.ReasonInsufficientIngesterReplicas),
 			Message: fmt.Sprintf("The ingester replicas (%d) are less than or equal to the replication factor (%d). Which causes log ingestion to stop when ingester pods get restarted.", replicas, rf),
+		})
+	}
+
+	return warnings
+}
+
+func checkSchemaWarnings(stack *lokiv1.LokiStack) []metav1.Condition {
+	warnings := make([]metav1.Condition, 0, 4)
+	schemas := stack.Spec.Storage.Schemas
+	statusSchemas := stack.Status.Storage.Schemas
+
+	if len(schemas) == 0 {
+		return warnings
+	}
+
+	// Check spec schemas: warn if last schema is not v13
+	if schemas[len(schemas)-1].Version != lokiv1.ObjectStorageSchemaV13 {
+		warnings = append(warnings, metav1.Condition{
+			Type:    string(lokiv1.ConditionWarning),
+			Reason:  string(lokiv1.ReasonStorageNeedsSchemaUpdate),
+			Message: messageWarningNeedsSchemaVersionUpdate,
+		})
+	}
+
+	// Check status schemas for additional warnings (only if status is populated)
+	if len(statusSchemas) == 0 {
+		return warnings
+	}
+
+	hasObsolete := false
+	hasOldVersion := false
+	hasFutureOldVersion := false
+
+	for _, schema := range statusSchemas {
+		switch schema.Status {
+		case lokiv1.SchemaStatusObsolete:
+			hasObsolete = true
+		case lokiv1.SchemaStatusFuture:
+			if schema.Version != lokiv1.ObjectStorageSchemaV13 {
+				hasFutureOldVersion = true
+			}
+		case lokiv1.SchemaStatusInUse:
+			if schema.Version != lokiv1.ObjectStorageSchemaV13 {
+				hasOldVersion = true
+			}
+		}
+	}
+
+	if hasObsolete {
+		warnings = append(warnings, metav1.Condition{
+			Type:    string(lokiv1.ConditionWarning),
+			Reason:  string(lokiv1.ReasonObsoleteSchemaPresent),
+			Message: "One or more schemas are obsolete and no longer in use due to retention settings. These schemas can be safely removed from the configuration.",
+		})
+	}
+
+	if hasOldVersion {
+		warnings = append(warnings, metav1.Condition{
+			Type:    string(lokiv1.ConditionWarning),
+			Reason:  string(lokiv1.ReasonOldSchemaVersion),
+			Message: "One or more active schemas are using an older schema version. Consider migrating to v13 for better performance.",
+		})
+	}
+
+	if hasFutureOldVersion {
+		warnings = append(warnings, metav1.Condition{
+			Type:    string(lokiv1.ConditionWarning),
+			Reason:  string(lokiv1.ReasonFutureOldSchemaVersion),
+			Message: "One or more future schemas are scheduled with an older schema version. Consider using v13 for new schemas.",
 		})
 	}
 

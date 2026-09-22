@@ -67,10 +67,11 @@ func TestSetStorageSchemaStatus_WhenStorageStatusExists_OverwriteStorageStatus(t
 		Status: lokiv1.LokiStackStatus{
 			Storage: lokiv1.LokiStackStorageStatus{
 				CredentialMode: lokiv1.CredentialModeStatic,
-				Schemas: []lokiv1.ObjectStorageSchema{
+				Schemas: []lokiv1.ObjectStorageSchemaStatus{
 					{
 						Version:       lokiv1.ObjectStorageSchemaV11,
 						EffectiveDate: "2020-10-11",
+						Status:        lokiv1.SchemaStatusInUse,
 					},
 				},
 			},
@@ -97,14 +98,18 @@ func TestSetStorageSchemaStatus_WhenStorageStatusExists_OverwriteStorageStatus(t
 
 	expected := lokiv1.LokiStackStorageStatus{
 		CredentialMode: lokiv1.CredentialModeStatic,
-		Schemas: []lokiv1.ObjectStorageSchema{
+		Schemas: []lokiv1.ObjectStorageSchemaStatus{
 			{
 				Version:       lokiv1.ObjectStorageSchemaV11,
 				EffectiveDate: "2020-10-11",
+				EndDate:       "2021-10-11", // End date is next schema's effective date
+				Status:        lokiv1.SchemaStatusInUse,
 			},
 			{
 				Version:       lokiv1.ObjectStorageSchemaV12,
 				EffectiveDate: "2021-10-11",
+				// No EndDate for last schema
+				Status: lokiv1.SchemaStatusInUse,
 			},
 		},
 	}

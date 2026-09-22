@@ -688,6 +688,50 @@ type ObjectStorageSchema struct {
 	EffectiveDate StorageSchemaEffectiveDate `json:"effectiveDate"`
 }
 
+// ObjectStorageSchemaStatusType identifies the observed status of a storage schema.
+//
+// +kubebuilder:validation:Enum=obsolete;inuse;future
+type ObjectStorageSchemaStatusType string
+
+const (
+	// SchemaStatusObsolete indicates the schema is no longer used (older than retention period).
+	SchemaStatusObsolete ObjectStorageSchemaStatusType = "obsolete"
+
+	// SchemaStatusInUse indicates the schema is currently active for reading or writing data.
+	SchemaStatusInUse ObjectStorageSchemaStatusType = "inuse"
+
+	// SchemaStatusFuture indicates the schema is scheduled to become active in the future.
+	SchemaStatusFuture ObjectStorageSchemaStatusType = "future"
+)
+
+// ObjectStorageSchemaStatus contains the observed status of a storage schema.
+type ObjectStorageSchemaStatus struct {
+	// Version for writing and reading logs.
+	//
+	// +required
+	// +kubebuilder:validation:Required
+	Version ObjectStorageSchemaVersion `json:"version"`
+
+	// EffectiveDate contains the date when this schema became or will become active.
+	//
+	// +required
+	// +kubebuilder:validation:Required
+	EffectiveDate StorageSchemaEffectiveDate `json:"effectiveDate"`
+
+	// EndDate contains the last date this schema was or will be active.
+	// Empty for the currently active schema.
+	//
+	// +optional
+	// +kubebuilder:validation:Optional
+	EndDate StorageSchemaEffectiveDate `json:"endDate,omitempty"`
+
+	// Status indicates whether this schema is obsolete, in use, or scheduled for future activation.
+	//
+	// +required
+	// +kubebuilder:validation:Required
+	Status ObjectStorageSchemaStatusType `json:"status"`
+}
+
 // ObjectStorageSpec defines the requirements to access the object
 // storage bucket to persist logs by the ingester component.
 type ObjectStorageSpec struct {
@@ -1426,6 +1470,12 @@ const (
 	ReasonStorageNeedsSchemaUpdate LokiStackConditionReason = "StorageNeedsSchemaUpdate"
 	// ReasonInsufficientIngesterReplicas when the ingester replicas are less than or equal to the replication factor. Which causes log ingestion to stop when ingester pods get restarted.
 	ReasonInsufficientIngesterReplicas LokiStackConditionReason = "InsufficientIngesterReplicas"
+	// ReasonObsoleteSchemaPresent when schemas exist that are obsolete due to retention settings
+	ReasonObsoleteSchemaPresent LokiStackConditionReason = "ObsoleteSchemaPresent"
+	// ReasonOldSchemaVersion when schemas are using an older schema version than the latest supported
+	ReasonOldSchemaVersion LokiStackConditionReason = "OldSchemaVersion"
+	// ReasonFutureOldSchemaVersion when future schemas are scheduled with an older schema version
+	ReasonFutureOldSchemaVersion LokiStackConditionReason = "FutureOldSchemaVersion"
 )
 
 // PodStatus is a short description of the status a Pod can be in.
@@ -1535,12 +1585,12 @@ const (
 // LokiStackStorageStatus defines the observed state of
 // the Loki storage configuration.
 type LokiStackStorageStatus struct {
-	// Schemas is a list of schemas which have been applied
-	// to the LokiStack.
+	// Schemas contains the observed status of each configured schema,
+	// including whether it is obsolete, in use, or scheduled for future activation.
 	//
 	// +optional
 	// +kubebuilder:validation:Optional
-	Schemas []ObjectStorageSchema `json:"schemas,omitempty"`
+	Schemas []ObjectStorageSchemaStatus `json:"schemas,omitempty"`
 
 	// CredentialMode contains the authentication mode used for accessing the object storage.
 	//

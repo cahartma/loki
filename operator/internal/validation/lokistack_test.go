@@ -57,14 +57,17 @@ var ltt = []struct {
 			},
 			Status: lokiv1.LokiStackStatus{
 				Storage: lokiv1.LokiStackStorageStatus{
-					Schemas: []lokiv1.ObjectStorageSchema{
+					Schemas: []lokiv1.ObjectStorageSchemaStatus{
 						{
 							Version:       lokiv1.ObjectStorageSchemaV11,
 							EffectiveDate: "2020-10-11",
+							EndDate:       "2020-10-13",
+							Status:        lokiv1.SchemaStatusInUse,
 						},
 						{
 							Version:       lokiv1.ObjectStorageSchemaV12,
 							EffectiveDate: "2020-10-13",
+							Status:        lokiv1.SchemaStatusInUse,
 						},
 					},
 				},
@@ -197,10 +200,11 @@ var ltt = []struct {
 			},
 			Status: lokiv1.LokiStackStatus{
 				Storage: lokiv1.LokiStackStorageStatus{
-					Schemas: []lokiv1.ObjectStorageSchema{
+					Schemas: []lokiv1.ObjectStorageSchemaStatus{
 						{
 							Version:       lokiv1.ObjectStorageSchemaV11,
 							EffectiveDate: "2020-10-11",
+							Status:        lokiv1.SchemaStatusInUse,
 						},
 					},
 				},
@@ -236,14 +240,17 @@ var ltt = []struct {
 			},
 			Status: lokiv1.LokiStackStatus{
 				Storage: lokiv1.LokiStackStorageStatus{
-					Schemas: []lokiv1.ObjectStorageSchema{
+					Schemas: []lokiv1.ObjectStorageSchemaStatus{
 						{
 							Version:       lokiv1.ObjectStorageSchemaV11,
 							EffectiveDate: "2020-10-11",
+							EndDate:       "2020-10-14",
+							Status:        lokiv1.SchemaStatusInUse,
 						},
 						{
 							Version:       lokiv1.ObjectStorageSchemaV12,
 							EffectiveDate: "2020-10-14",
+							Status:        lokiv1.SchemaStatusInUse,
 						},
 					},
 				},
@@ -281,10 +288,11 @@ var ltt = []struct {
 			},
 			Status: lokiv1.LokiStackStatus{
 				Storage: lokiv1.LokiStackStorageStatus{
-					Schemas: []lokiv1.ObjectStorageSchema{
+					Schemas: []lokiv1.ObjectStorageSchemaStatus{
 						{
 							Version:       lokiv1.ObjectStorageSchemaV11,
 							EffectiveDate: "2020-10-11",
+							Status:        lokiv1.SchemaStatusInUse,
 						},
 					},
 				},

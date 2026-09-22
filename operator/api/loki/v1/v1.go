@@ -20,6 +20,11 @@ func (d StorageSchemaEffectiveDate) UTCTime() (time.Time, error) {
 	return time.Parse(StorageSchemaEffectiveDateFormat, string(d))
 }
 
+// IsZero returns true if the date is empty
+func (d StorageSchemaEffectiveDate) IsZero() bool {
+	return string(d) == ""
+}
+
 const (
 	// StorageSchemaEffectiveDateFormat is the datetime string need to format the time.
 	StorageSchemaEffectiveDateFormat = "2006-01-02"

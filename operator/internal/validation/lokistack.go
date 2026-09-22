@@ -376,7 +376,7 @@ func ValidateSchemas(v *lokiv1.ObjectStorageSpec, utcTime time.Time, status loki
 }
 
 // buildAppliedSchemaMap creates a map of schemas which occur before the given time
-func buildAppliedSchemaMap(schemas []lokiv1.ObjectStorageSchema, effectiveDate time.Time) objectStorageSchemaMap {
+func buildAppliedSchemaMap(schemas []lokiv1.ObjectStorageSchemaStatus, effectiveDate time.Time) objectStorageSchemaMap {
 	appliedMap := objectStorageSchemaMap{}
 
 	for _, schema := range schemas {
