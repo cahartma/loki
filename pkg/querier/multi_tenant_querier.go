@@ -2,6 +2,8 @@ package querier
 
 import (
 	"context"
+	"fmt"
+	"math/bits"
 	"sort"
 	"strings"
 
@@ -23,6 +25,7 @@ import (
 	"github.com/grafana/loki/v3/pkg/logql"
 	"github.com/grafana/loki/v3/pkg/logql/syntax"
 	"github.com/grafana/loki/v3/pkg/storage/stores/index/stats"
+	"github.com/grafana/loki/v3/pkg/util"
 )
 
 const (
@@ -62,7 +65,10 @@ func (q *MultiTenantQuerier) SelectLogs(ctx context.Context, params logql.Select
 	if err := syntax.ValidateMatchers(filteredMatchers); err != nil {
 		return nil, err
 	}
-	updatedSelector := replaceMatchers(selector, filteredMatchers)
+	updatedSelector, err := replaceMatchers(selector, filteredMatchers)
+	if err != nil {
+		return nil, err
+	}
 
 	// Update Plan with the modified AST directly (no string round-trip)
 	params.Plan = &plan.QueryPlan{
@@ -99,7 +105,7 @@ func (q *MultiTenantQuerier) SelectLogs(ctx context.Context, params logql.Select
 	return iter.NewSortEntryIterator(iters, params.Direction), nil
 }
 
-func (q *MultiTenantQuerier) SelectSamples(ctx context.Context, params logql.SelectSampleParams) (iter.SampleIterator, error) {
+func (q *MultiTenantQuerier) SelectSamples(ctx context.Context, params logql.SelectSampleParams) (_ iter.SampleIterator, returnErr error) {
 	tenantIDs, err := tenant.TenantIDs(ctx)
 	if err != nil {
 		return nil, err
@@ -130,8 +136,19 @@ func (q *MultiTenantQuerier) SelectSamples(ctx context.Context, params logql.Sel
 		storeOverridesByTenant = partitionChunkRefsByTenant(params.GetStoreChunks().Refs)
 	}
 
-	iters := make([]iter.SampleIterator, len(matchedTenants))
-	i := 0
+	iters := make([]iter.SampleIterator, 0, len(matchedTenants))
+
+	// If SelectSamples returns an error below, close every per-tenant iterator opened so far,
+	// so neither a later tenant's error nor a rejected order leaks them.
+	defer func() {
+		if returnErr == nil {
+			return
+		}
+		for _, opened := range iters {
+			util.LogErrorWithContext(ctx, "closing per-tenant sample iterator after SelectSamples failed", opened.Close)
+		}
+	}()
+
 	for id := range matchedTenants {
 		singleContext := user.InjectOrgID(ctx, id)
 		tenantParams := params
@@ -140,15 +157,22 @@ func (q *MultiTenantQuerier) SelectSamples(ctx context.Context, params logql.Sel
 			tenantParams = tenantParams.WithStoreChunks(&logproto.ChunkRefGroup{Refs: tenantChunkOverrides})
 		}
 
-		iter, err := q.Querier.SelectSamples(singleContext, tenantParams)
+		tenantIter, err := q.Querier.SelectSamples(singleContext, tenantParams)
 		if err != nil {
 			return nil, err
 		}
 
-		iters[i] = NewTenantSampleIterator(iter, id)
-		i++
+		iters = append(iters, NewTenantSampleIterator(tenantIter, id))
 	}
-	return iter.NewSortSampleIterator(iters), nil
+
+	switch params.Order {
+	case logproto.SAMPLE_ORDER_BY_STREAM:
+		return iter.NewStreamFirstSortSampleIterator(iters), nil
+	case logproto.SAMPLE_ORDER_BY_TIMESTAMP:
+		return iter.NewTimestampFirstSortSampleIterator(iters), nil
+	default:
+		return nil, fmt.Errorf("unknown sample order %v", params.Order)
+	}
 }
 
 func (q *MultiTenantQuerier) Label(ctx context.Context, req *logproto.LabelRequest) (*logproto.LabelResponse, error) {
@@ -395,6 +419,8 @@ func (q *MultiTenantQuerier) DetectedLabels(ctx context.Context, req *logproto.D
 //   - matchedTenants: tenant IDs that matched the selector's tenant filter
 //   - filteredMatchers: matchers with __tenant_id__ removed, for validation before use
 //   - updatedExpr: the expression with filteredMatchers already applied
+//
+// The expression must contain exactly one stream selector, see replaceMatchers.
 func removeTenantSelector(params logql.SelectSampleParams, tenantIDs []string) (matchedTenants map[string]struct{}, filteredMatchers []*labels.Matcher, updatedExpr syntax.Expr, err error) {
 	expr, err := params.Expr()
 	if err != nil {
@@ -405,21 +431,43 @@ func removeTenantSelector(params logql.SelectSampleParams, tenantIDs []string) (
 		return nil, nil, nil, err
 	}
 	matchedTenants, filteredMatchers = filterValuesByMatchers(defaultTenantLabel, tenantIDs, selector.Matchers()...)
-	updatedExpr = replaceMatchers(expr, filteredMatchers)
+	updatedExpr, err = replaceMatchers(expr, filteredMatchers)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	return matchedTenants, filteredMatchers, updatedExpr, nil
 }
 
-// replaceMatchers traverses the passed expression and replaces all matchers.
-func replaceMatchers(expr syntax.Expr, matchers []*labels.Matcher) syntax.Expr {
-	expr, _ = syntax.Clone(expr)
+// replaceMatchers returns a copy of the passed expression with its stream
+// selector replaced by the given matchers.
+//
+// The expression must contain exactly one stream selector, because a single set
+// of matchers cannot describe more than one. Callers in this package satisfy
+// that precondition: the query engine decomposes binary operations into one
+// subquery per operand before calling into the querier, so every expression
+// that reaches here is a leaf with a single selector. An expression with
+// multiple selectors is rejected instead of silently having all of them
+// overwritten with the matchers of the first one.
+func replaceMatchers(expr syntax.Expr, matchers []*labels.Matcher) (syntax.Expr, error) {
+	expr, err := syntax.Clone(expr)
+	if err != nil {
+		return nil, err
+	}
+
+	selectors := 0
 	expr.Walk(func(e syntax.Expr) bool {
 		switch concrete := e.(type) {
 		case *syntax.MatchersExpr:
+			selectors++
 			concrete.Mts = matchers
 		}
 		return true
 	})
-	return expr
+	if selectors > 1 {
+		return nil, fmt.Errorf("multi-tenant queries do not support expressions with more than one stream selector, got %d", selectors)
+	}
+
+	return expr, nil
 }
 
 // See https://github.com/grafana/mimir/blob/114ab88b50638a2047e2ca2a60640f6ca6fe8c17/pkg/querier/tenantfederation/tenant_federation.go#L29-L69
@@ -522,21 +570,38 @@ func (i *TenantEntryIterator) Labels() string {
 type TenantSampleIterator struct {
 	iter.SampleIterator
 	relabel
+
+	// tenantHash qualifies StreamHash by tenant. It is derived from tenantID alone, so
+	// it stays fixed for the life of this iterator.
+	tenantHash uint64
 }
 
-func NewTenantSampleIterator(iter iter.SampleIterator, id string) *TenantSampleIterator {
+func NewTenantSampleIterator(iter iter.SampleIterator, tenantID string) *TenantSampleIterator {
 	return &TenantSampleIterator{
 		SampleIterator: iter,
 		relabel: relabel{
-			tenantID: id,
+			tenantID: tenantID,
 			cache:    map[string]labels.Labels{},
 		},
+		tenantHash: labels.StableHash(labels.FromStrings(defaultTenantLabel, tenantID)),
 	}
 
 }
 
 func (i *TenantSampleIterator) Labels() string {
 	return i.relabel.relabel(i.SampleIterator.Labels())
+}
+
+// StreamHash returns a fingerprint that stays fixed for the life of one log stream and
+// differs across tenants. Two tenants can otherwise select a stream with the same
+// labels: a stream-first sort or merge across tenants would then group their samples
+// into one run instead of keeping them apart.
+func (i *TenantSampleIterator) StreamHash() uint64 {
+	// Labels() is not fixed per stream: structured metadata and label_format can both
+	// make it vary per sample. Hashing it here would fragment one stream into many
+	// stream-first runs. Mix the tenant into the wrapped iterator's own StreamHash
+	// instead, since that stays fixed per stream by contract.
+	return i.tenantHash ^ bits.RotateLeft64(i.SampleIterator.StreamHash(), 32)
 }
 
 func partitionChunkRefsByTenant(refs []*logproto.ChunkRef) map[string][]*logproto.ChunkRef {

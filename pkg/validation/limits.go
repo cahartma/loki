@@ -642,6 +642,10 @@ func (l *Limits) Validate() error {
 		}
 	}
 
+	if err := l.ShardStreams.Validate(); err != nil {
+		return err
+	}
+
 	for policy, pl := range l.PolicyOverrideLimits {
 		if err := pl.Validate(); err != nil {
 			return fmt.Errorf("policy_override_limits[%q]: %w", policy, err)
@@ -818,10 +822,6 @@ func (o *Overrides) MaxChunksPerQuery(userID string) int {
 func (o *Overrides) MaxQueryLength(_ context.Context, userID string) time.Duration {
 	return time.Duration(o.getOverridesForUser(userID).MaxQueryLength)
 }
-
-// Compatibility with Cortex interface, this method is set to be removed in 1.12,
-// so nooping in Loki until then.
-func (o *Overrides) MaxChunksPerQueryFromStore(_ string) int { return 0 }
 
 // MaxQuerySeries returns the limit of the series of metric queries.
 func (o *Overrides) MaxQuerySeries(_ context.Context, userID string) int {
